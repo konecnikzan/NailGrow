@@ -82,16 +82,19 @@ queries cover this app.
 
 ## Structure
 
+Routes live in `src/app/` (the Expo SDK 54+ template default — `expo-router`
+resolves it automatically). Everything else lives beside it under `src/`.
+
 ```
-app/                    # expo-router routes
-  (tabs)/
-    index.tsx           # today — capture, streak, quick actions
-    timeline.tsx        # all photos, per-nail views
-    compare.tsx         # before/after slider
-    settings.tsx
-  capture.tsx           # full-screen camera with alignment assist
-  onboarding/
 src/
+  app/                  # expo-router routes
+    (tabs)/
+      index.tsx         # today — capture, streak, quick actions
+      timeline.tsx      # all photos, per-nail views
+      compare.tsx       # before/after slider
+      settings.tsx
+    capture.tsx         # full-screen camera with alignment assist
+    onboarding/
   db/                   # drizzle schema, migrations, queries
   photos/               # capture, storage, verification, export
   notifications/        # scheduling, throttle detection
