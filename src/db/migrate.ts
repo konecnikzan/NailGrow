@@ -1,7 +1,7 @@
 import { useMigrations } from 'drizzle-orm/expo-sqlite/migrator';
 
 import { db } from './client';
-import migrations from './migrations/migrations';
+import migrations from './migrations/bundle';
 
 /**
  * Runs any pending migrations against the on-device database and reports state.

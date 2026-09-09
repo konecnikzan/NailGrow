@@ -7,10 +7,13 @@ import type { FsPort } from '../ports';
  *
  * NOTE (Android dev): `new File(uri)` is NOT `java.io.File` and is NOT an open
  * handle — it is a lightweight reference that touches disk only when you call a
- * method, and most of those methods (`exists`, `size`, `create`, `delete`,
- * `move`) are synchronous. `Paths.document` is the app's private documents
- * directory; files there are safe from the OS cache eviction that clears
- * `Paths.cache`.
+ * method. Also note the API has BOTH async (`move`, `copy`) and sync (`moveSync`,
+ * `copySync`, `delete`, `create`) variants of the mutating methods. This port is
+ * synchronous, so it must use the `*Sync` ones — calling the async `move` here
+ * and returning before it settles is what caused capture verification to race.
+ *
+ * `Paths.document` is the app's private documents directory; files there survive
+ * the OS cache eviction that clears `Paths.cache`.
  */
 export function createExpoFsPort(): FsPort {
   return {
@@ -31,9 +34,8 @@ export function createExpoFsPort(): FsPort {
     },
 
     move(srcUri, destUri) {
-      // `move` rejects an existing destination unless `overwrite` is set. A retake
-      // reuses the same id (and therefore path), so overwrite is intended.
-      new File(srcUri).move(new File(destUri), { overwrite: true });
+      // Synchronous move. `overwrite` because a retake reuses the same id/path.
+      new File(srcUri).moveSync(new File(destUri), { overwrite: true });
     },
 
     remove(uri) {
