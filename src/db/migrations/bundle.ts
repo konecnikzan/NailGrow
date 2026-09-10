@@ -11,6 +11,13 @@ const journal = {
       "when": 1788981313530,
       "tag": "0000_quick_the_call",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1789058892449,
+      "tag": "0001_free_donald_blake",
+      "breakpoints": true
     }
   ]
 };
@@ -73,6 +80,8 @@ CREATE TABLE \`triggers\` (
 );
 --> statement-breakpoint
 CREATE INDEX \`triggers_occurred_at_idx\` ON \`triggers\` (\`occurred_at\`);`,
+  m0001: `ALTER TABLE \`photos\` ADD \`is_reference\` integer DEFAULT false NOT NULL;--> statement-breakpoint
+CREATE UNIQUE INDEX \`photos_reference_per_hand_unq\` ON \`photos\` (\`hand\`) WHERE "photos"."is_reference" = 1;`,
 };
 
 /** Consumed by `useMigrations` / `migrate` from `drizzle-orm/expo-sqlite/migrator`. */

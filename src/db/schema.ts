@@ -61,11 +61,25 @@ export const photos = sqliteTable(
       (): AnySQLiteColumn => photos.id,
       { onDelete: 'set null' },
     ),
+    /**
+     * True for the one photo pinned as the ghost-overlay reference for its hand.
+     * Set only by an explicit user action (`pinReference`/`unpinReference`) — never
+     * automatically on first capture. Unrelated to `referencePhotoId` above, which
+     * records what a given photo was aligned against at capture time; this instead
+     * marks which single photo IS the current reference for its hand.
+     */
+    isReference: integer('is_reference', { mode: 'boolean' }).notNull().default(false),
   },
   (t) => [
     index('photos_captured_at_idx').on(t.capturedAt),
     index('photos_hand_idx').on(t.hand),
     index('photos_reference_photo_id_idx').on(t.referencePhotoId),
+    // Guardrail, same pattern as streaks_single_active_unq: at most one reference
+    // photo per hand. The query layer also enforces this (pinReference unpins the
+    // old one in the same transaction), but the DB is the backstop.
+    uniqueIndex('photos_reference_per_hand_unq')
+      .on(t.hand)
+      .where(sql`${t.isReference} = 1`),
   ],
 );
 

@@ -47,6 +47,48 @@ is a promise we make in the store listing, and it's our sharpest differentiator:
 NailKeeper's Play data safety section declares it may collect location and share
 personal info with third parties, for an app that photographs your hands.
 
+**One premium, Apple-inspired design system on both platforms — not
+OS-idiomatic switching.** This app competes on trust and polish against an
+incumbent with a dated, template-y interface, and a consistent brand look is
+part of that: the app should feel and look the same on iOS and Android, not
+switch visual language per platform. Concretely:
+
+- **Tab bar:** a custom-built, floating component — not `NativeTabs`. A
+  compact capsule centered above the bottom edge (not edge-to-edge, not
+  docked flush): each tab is icon-only until selected, at which point it
+  expands to an accent-filled pill showing its label, animated via Reanimated's
+  `LinearTransition` (no manual width/interpolation code), with a light haptic
+  tap on press. Solid surface + hairline border + soft shadow, identical on
+  both platforms — no blur dependency, so there's no iOS/Android fidelity gap
+  to explain away. A true native Android tab bar renders Material 3 (pill
+  indicator, ripple), which cannot be restyled into an Apple look without
+  ceasing to be the real OS component, so this app deliberately trades
+  true-native chrome for one consistent premium tab bar. This also avoids
+  `NativeTabs`' alpha/breaking-changes risk entirely — plain, stable APIs
+  throughout. (We tried `NativeTabs` first; it works fine in Expo Go, but a
+  real Android Material 3 bar next to real iOS Liquid Glass is two visual
+  languages, which is exactly what this principle rules out.)
+- Because the bar floats instead of docking, screens must add their own
+  bottom padding/inset so content can scroll fully clear of it — the bar is
+  an overlay, not a layout sibling that reserves space.
+- **Everything else — typography, spacing, colour, cards, icons, the capture
+  and comparison screens — is one Apple-inspired design system on both
+  platforms.** SF Pro–equivalent type scale (largeTitle/title/body/caption,
+  not arbitrary sizes), iOS's 8pt spacing grid, 44pt minimum tap targets,
+  generous whitespace, subtle depth over flat Material colour blocks. Android
+  gets the same design language, not Material's.
+- **Platform-native behaviour still matters underneath the custom visuals** —
+  correct system keyboard, native alerts and action sheets, native gesture
+  handling (iOS swipe-back, Android hardware back), accessibility semantics.
+  "Custom visual design" means the pixels; it doesn't mean reinventing things
+  the OS already handles correctly.
+- Prefer platform-native components for anything not visually tab-bar-like
+  (SF Symbols via `expo-symbols` on iOS, native modals) where they don't
+  conflict with the unified look. Treat Apple's Human Interface Guidelines as
+  the default reference for spacing, typography scale, and motion on *both*
+  platforms — this is a deliberate, considered choice to prioritise brand
+  consistency over OS-idiomatic switching, not an oversight.
+
 **No AI that judges the user.** NailKeeper shipped AI photo insights in 2026 and
 users rejected them ("some AI features, that I don't agree with"); the developer
 retreated and made them optional. AI in this app assists capture — hand alignment,
@@ -82,19 +124,16 @@ queries cover this app.
 
 ## Structure
 
-Routes live in `src/app/` (the Expo SDK 54+ template default — `expo-router`
-resolves it automatically). Everything else lives beside it under `src/`.
-
 ```
+app/                    # expo-router routes
+  (tabs)/
+    index.tsx           # today — capture, streak, quick actions
+    timeline.tsx        # all photos, per-nail views
+    compare.tsx         # before/after slider
+    settings.tsx
+  capture.tsx           # full-screen camera with alignment assist
+  onboarding/
 src/
-  app/                  # expo-router routes
-    (tabs)/
-      index.tsx         # today — capture, streak, quick actions
-      timeline.tsx      # all photos, per-nail views
-      compare.tsx       # before/after slider
-      settings.tsx
-    capture.tsx         # full-screen camera with alignment assist
-    onboarding/
   db/                   # drizzle schema, migrations, queries
   photos/               # capture, storage, verification, export
   notifications/        # scheduling, throttle detection

@@ -1,0 +1,2 @@
+ALTER TABLE `photos` ADD `is_reference` integer DEFAULT false NOT NULL;--> statement-breakpoint
+CREATE UNIQUE INDEX `photos_reference_per_hand_unq` ON `photos` (`hand`) WHERE "photos"."is_reference" = 1;

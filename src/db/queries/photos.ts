@@ -3,6 +3,7 @@ import { and, asc, eq, gte, lte } from 'drizzle-orm';
 import { newId } from '../ids';
 import {
   type FingerId,
+  type Hand,
   type Nail,
   type NewNail,
   type NewPhoto,
@@ -118,4 +119,56 @@ export function listPhotosForFinger(
  */
 export function deletePhotoRow(db: Database, id: string): void {
   db.delete(photos).where(eq(photos.id, id)).run();
+}
+
+/** The photo currently pinned as the reference for `hand`, if any. */
+export function getReferencePhoto(db: Database, hand: Hand): Photo | undefined {
+  return db
+    .select()
+    .from(photos)
+    .where(and(eq(photos.hand, hand), eq(photos.isReference, true)))
+    .get();
+}
+
+/**
+ * Pin `photoId` as the reference for its hand. Unpins whatever was previously
+ * pinned for that hand first, in the same transaction — same pattern as
+ * `logRelapse`: the two writes either both happen or neither does, so there is
+ * never a moment with zero or two reference photos for a hand mid-operation.
+ *
+ * Throws if `photoId` does not exist; the DB's partial unique index
+ * (`photos_reference_per_hand_unq`) is the backstop against ending up with two.
+ */
+export function pinReference(db: Database, photoId: string): Photo {
+  return db.transaction((tx) => {
+    const target = tx.select().from(photos).where(eq(photos.id, photoId)).get();
+    if (!target) {
+      throw new Error(`pinReference: no photo with id ${photoId}`);
+    }
+    if (target.isReference) return target; // already pinned — nothing to unpin
+
+    const previous = tx
+      .select()
+      .from(photos)
+      .where(and(eq(photos.hand, target.hand), eq(photos.isReference, true)))
+      .get();
+    if (previous) {
+      tx.update(photos).set({ isReference: false }).where(eq(photos.id, previous.id)).run();
+    }
+
+    return tx
+      .update(photos)
+      .set({ isReference: true })
+      .where(eq(photos.id, photoId))
+      .returning()
+      .get();
+  });
+}
+
+/** Unpin the reference photo for `hand`, if one is pinned. A no-op otherwise. */
+export function unpinReference(db: Database, hand: Hand): void {
+  db.update(photos)
+    .set({ isReference: false })
+    .where(and(eq(photos.hand, hand), eq(photos.isReference, true)))
+    .run();
 }

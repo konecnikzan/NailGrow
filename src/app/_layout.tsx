@@ -12,20 +12,25 @@ export default function RootLayout() {
   // migrations have run. On device this is a single frame after first launch.
   if (error) {
     return (
-      <View className="flex-1 items-center justify-center gap-2 p-6">
-        <Text className="text-base font-semibold">Database migration failed</Text>
-        <Text className="text-center text-sm">{error.message}</Text>
+      <View className="flex-1 items-center justify-center gap-2 bg-background p-6">
+        <Text className="text-headline text-label">Database migration failed</Text>
+        <Text className="text-center text-footnote text-secondaryLabel">{error.message}</Text>
       </View>
     );
   }
 
   if (!success) {
     return (
-      <View className="flex-1 items-center justify-center">
+      <View className="flex-1 items-center justify-center bg-background">
         <ActivityIndicator />
       </View>
     );
   }
 
-  return <Stack screenOptions={{ headerShown: false }} />;
+  return (
+    <Stack screenOptions={{ headerShown: false }}>
+      <Stack.Screen name="(tabs)" />
+      <Stack.Screen name="capture" options={{ presentation: 'modal' }} />
+    </Stack>
+  );
 }
