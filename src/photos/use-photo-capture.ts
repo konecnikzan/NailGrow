@@ -2,73 +2,106 @@ import type { CameraView } from 'expo-camera';
 import { useCameraPermissions } from 'expo-camera';
 import { useCallback, useState } from 'react';
 
+import { db } from '@/db/client';
+import { pinReference } from '@/db/queries';
 import type { Hand, Photo } from '@/db/schema';
 
 import { capturePhoto } from './index';
 
-export interface PhotoCaptureController {
-  permissionGranted: boolean;
-  requestPermission: () => void;
-  /** Take a picture with `camera` and run it through the pipeline. Returns the row, or null on any failure. */
-  capture: (camera: CameraView | null, hand: Hand) => Promise<Photo | null>;
-  busy: boolean;
-  /** Human-readable text for the last failure (typed error code + message), or null. */
-  lastError: string | null;
+/** A raw frame from the camera — written to the cache dir, not yet committed. */
+export interface RawShot {
+  uri: string;
+  width: number;
+  height: number;
+  /** EXIF `Orientation` (1-8) the camera reported, if any. */
+  orientation?: number;
 }
 
+export interface CommitOptions {
+  hand: Hand;
+  /** The reference photo this frame was aligned against, for the row's `referencePhotoId`. */
+  referencePhotoId: string | null;
+  /** Pin the saved photo as this hand's reference (only meaningful if the hand has none). */
+  pinAsReference: boolean;
+}
+
+export type CommitResult =
+  | { ok: true; photo: Photo }
+  | { ok: false; message: string };
+
 /**
- * Bridges `expo-camera` to the photo pipeline for the test harness.
+ * Two-step capture for the capture screen: `takeShot` grabs a frame to preview,
+ * `commit` runs it through the pipeline (and optionally pins it) once the user
+ * confirms. Splitting them means a discarded/retaken frame never touches the
+ * database or the document directory.
  *
- * NOTE (Android dev): `takePictureAsync` writes a TEMP file into the cache
- * directory and returns its `uri`. That file is not durable — the pipeline reads
- * it, normalises it, and writes the real copy into the document directory. We
- * pass `exif: true` so the pipeline can record the source frame's EXIF
- * orientation before baking it into the pixels.
+ * NOTE (Android dev): `takePictureAsync` returns a TEMP file in the cache dir.
+ * It's fine to sit on that URI through the confirm step; if it's somehow gone by
+ * the time the user hits "Use photo", `capturePhoto` returns a typed
+ * `SOURCE_MISSING` and we surface it.
  */
-export function usePhotoCapture(): PhotoCaptureController {
+export function usePhotoCapture() {
   const [permission, requestPermissionAsync] = useCameraPermissions();
   const [busy, setBusy] = useState(false);
-  const [lastError, setLastError] = useState<string | null>(null);
 
-  const capture = useCallback<PhotoCaptureController['capture']>(async (camera, hand) => {
-    if (!camera) {
-      setLastError('camera not ready');
-      return null;
-    }
-    setBusy(true);
-    setLastError(null);
-    try {
-      const shot = await camera.takePictureAsync({ exif: true, quality: 1 });
-      if (!shot?.uri) {
-        setLastError('camera returned no image');
-        return null;
+  const takeShot = useCallback(
+    async (camera: CameraView | null): Promise<RawShot | null> => {
+      if (!camera) return null;
+      setBusy(true);
+      try {
+        const shot = await camera.takePictureAsync({ exif: true, quality: 1 });
+        if (!shot?.uri) return null;
+        const orientation = shot.exif?.Orientation;
+        return {
+          uri: shot.uri,
+          width: shot.width,
+          height: shot.height,
+          orientation: typeof orientation === 'number' ? orientation : undefined,
+        };
+      } finally {
+        setBusy(false);
       }
+    },
+    [],
+  );
 
-      const orientation = shot.exif?.Orientation;
-      const result = await capturePhoto({
-        sourceUri: shot.uri,
-        hand,
-        sourceOrientation: typeof orientation === 'number' ? orientation : undefined,
-      });
-
-      if (!result.ok) {
-        setLastError(`${result.error.code}: ${result.error.message}`);
-        return null;
+  const commit = useCallback(
+    async (shot: RawShot, options: CommitOptions): Promise<CommitResult> => {
+      setBusy(true);
+      try {
+        const result = await capturePhoto({
+          sourceUri: shot.uri,
+          hand: options.hand,
+          sourceOrientation: shot.orientation,
+          referencePhotoId: options.referencePhotoId,
+        });
+        if (!result.ok) {
+          return { ok: false, message: `${result.error.code}: ${result.error.message}` };
+        }
+        if (options.pinAsReference) {
+          try {
+            pinReference(db, result.value.id);
+          } catch (pinError) {
+            // The photo is saved; only the pin failed. Don't fail the capture —
+            // the user can pin from the timeline later.
+            console.warn('pinReference after capture failed:', pinError);
+          }
+        }
+        return { ok: true, photo: result.value };
+      } catch (error) {
+        return { ok: false, message: String(error) };
+      } finally {
+        setBusy(false);
       }
-      return result.value;
-    } catch (error) {
-      setLastError(String(error));
-      return null;
-    } finally {
-      setBusy(false);
-    }
-  }, []);
+    },
+    [],
+  );
 
   return {
     permissionGranted: permission?.granted ?? false,
     requestPermission: () => void requestPermissionAsync(),
-    capture,
+    takeShot,
+    commit,
     busy,
-    lastError,
   };
 }
