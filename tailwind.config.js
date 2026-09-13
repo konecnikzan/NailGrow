@@ -31,12 +31,18 @@ module.exports = {
       // than inventing sizes Stitch never specified. Pair with the matching
       // `fonts.*` family from tokens.ts (weight lives in the font file, not a
       // separate `font-weight` — see src/ui/text.tsx).
+      //
+      // `label` (14/20 SemiBold Jakarta = the source's `label-lg`) is the
+      // button/interactive-label size — confirmed from the actual rendered
+      // HTML, which uses it for every button, not the 20px `headline` size we
+      // originally guessed.
       fontSize: {
         largeTitle: ['28px', '36px'],
         title1: ['24px', '32px'],
         title2: ['20px', '28px'],
         title3: ['20px', '28px'],
         headline: ['20px', '28px'],
+        label: ['14px', '20px'],
         body: ['16px', '24px'],
         callout: ['14px', '20px'],
         subheadline: ['14px', '20px'],
@@ -44,12 +50,18 @@ module.exports = {
         caption1: ['12px', '16px'],
         caption2: ['11px', '14px'],
       },
+      // The actual rendered HTML overrides the source's own "1.5rem/24px card
+      // radius" prose to 2rem/32px (`borderRadius.lg` in its Tailwind config,
+      // applied to every card) — going with what the screen actually renders,
+      // not the prose that disagrees with it.
+      borderRadius: {
+        card: '32px',
+      },
       // No custom spacing scale: Tailwind's default (each step = 4px) already
-      // covers Stitch's spacing tokens (margin 20px = px-5, gutter 16px = p-4,
-      // space-lg 24px = gap-6, etc.).
-      // No custom border-radius scale either: Tailwind's default `rounded-3xl`
-      // is already exactly 24px (Stitch's one card radius), and `rounded-full`
-      // is already the stadium/pill shape used everywhere else.
+      // covers what's actually used — 20px outer margin (px-5), 20px vertical
+      // rhythm between sections (gap-5, confirmed from the real markup's
+      // `space-y-5` — not `space-lg`/24px as guessed previously), 16px card
+      // padding (p-4) for most cards.
     },
   },
   plugins: [],

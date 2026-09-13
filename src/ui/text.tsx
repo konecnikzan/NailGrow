@@ -8,6 +8,7 @@ export type TextVariant =
   | 'title2'
   | 'title3'
   | 'headline'
+  | 'label'
   | 'body'
   | 'callout'
   | 'subheadline'
@@ -27,6 +28,10 @@ const FONT_FAMILY: Record<TextVariant, string> = {
   title2: fonts.headlineSemibold,
   title3: fonts.headlineSemibold,
   headline: fonts.headlineSemibold,
+  // The actual button/interactive-label size (14/20 SemiBold Jakarta) —
+  // confirmed from the real markup, which uses this for every button, not the
+  // larger `headline` size buttons were built with initially.
+  label: fonts.labelSemibold,
   body: fonts.bodyRegular,
   callout: fonts.bodyRegular,
   subheadline: fonts.bodyRegular,
@@ -38,8 +43,8 @@ const FONT_FAMILY: Record<TextVariant, string> = {
 // NativeWind's content scanner needs to see each `text-*` class literally
 // somewhere to generate it; `text-${variant}` below is runtime-only and won't
 // be found by the scanner on its own. This dead string is the safelist.
-// text-largeTitle text-title1 text-title2 text-title3 text-headline text-body
-// text-callout text-subheadline text-footnote text-caption1 text-caption2
+// text-largeTitle text-title1 text-title2 text-title3 text-headline text-label
+// text-body text-callout text-subheadline text-footnote text-caption1 text-caption2
 
 export interface AppTextProps extends TextProps {
   variant: TextVariant;

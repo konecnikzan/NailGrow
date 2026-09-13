@@ -6,7 +6,10 @@ import { Card } from './card';
 import { AppText } from './text';
 import { colors } from './tokens';
 
-const WEEKDAY_LABELS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
+// Monday-first, matching the real design ("M T W T F S S") — not the Sunday
+// start `Date.getDay()` gives you.
+const WEEKDAY_LABELS = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
+const CELL_SIZE = 32;
 
 /** Local-calendar-day key (not UTC) — a capture at 11pm shouldn't jump to the next day. */
 export function dateKey(date: Date): string {
@@ -42,9 +45,10 @@ export function CalendarGrid({
 }: CalendarGridProps) {
   const year = month.getFullYear();
   const monthIndex = month.getMonth();
-  const firstWeekday = new Date(year, monthIndex, 1).getDay(); // 0 = Sunday
+  // getDay() is 0=Sunday; shift so 0=Monday to match the Monday-first grid.
+  const firstWeekday = (new Date(year, monthIndex, 1).getDay() + 6) % 7;
   const daysInMonth = new Date(year, monthIndex + 1, 0).getDate();
-  const monthLabel = month.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+  const monthLabel = month.toLocaleDateString(undefined, { month: 'long' });
   // Snapshot "now" once per mount via useState's lazy initializer, not a plain
   // `new Date()` call during render (React Compiler requires render to stay
   // pure — a `useMemo` factory doesn't get the same exemption).
@@ -58,29 +62,34 @@ export function CalendarGrid({
   ];
 
   return (
-    <Card className="gap-3">
+    <Card className="gap-3 p-4">
       <View className="flex-row items-center justify-between">
-        <Pressable
-          onPress={() => onChangeMonth(-1)}
-          hitSlop={8}
-          accessibilityRole="button"
-          accessibilityLabel="Previous month"
-          className="h-11 w-11 items-center justify-center"
-        >
-          <Ionicons name="chevron-back" size={20} color={colors.label} />
-        </Pressable>
-        <AppText variant="headline" className="text-label">
-          {monthLabel}
-        </AppText>
-        <Pressable
-          onPress={() => onChangeMonth(1)}
-          hitSlop={8}
-          accessibilityRole="button"
-          accessibilityLabel="Next month"
-          className="h-11 w-11 items-center justify-center"
-        >
-          <Ionicons name="chevron-forward" size={20} color={colors.label} />
-        </Pressable>
+        <View className="flex-row items-baseline gap-2">
+          <AppText variant="headline" className="text-label">
+            {monthLabel}
+          </AppText>
+          <AppText variant="caption1" className="text-tertiaryLabel">
+            {year}
+          </AppText>
+        </View>
+        <View className="flex-row items-center gap-1">
+          <Pressable
+            onPress={() => onChangeMonth(-1)}
+            accessibilityRole="button"
+            accessibilityLabel="Previous month"
+            className="h-7 w-7 items-center justify-center rounded-full"
+          >
+            <Ionicons name="chevron-back" size={18} color={colors.secondaryLabel} />
+          </Pressable>
+          <Pressable
+            onPress={() => onChangeMonth(1)}
+            accessibilityRole="button"
+            accessibilityLabel="Next month"
+            className="h-7 w-7 items-center justify-center rounded-full"
+          >
+            <Ionicons name="chevron-forward" size={18} color={colors.secondaryLabel} />
+          </Pressable>
+        </View>
       </View>
 
       <View className="flex-row">
@@ -96,7 +105,12 @@ export function CalendarGrid({
       <View className="flex-row flex-wrap">
         {cells.map((date, i) => {
           if (!date) {
-            return <View key={`blank-${i}`} style={{ width: `${100 / 7}%`, aspectRatio: 1 }} />;
+            return (
+              <View
+                key={`blank-${i}`}
+                style={{ width: `${100 / 7}%`, height: CELL_SIZE + 8 }}
+              />
+            );
           }
           const key = dateKey(date);
           const isSelected = key === selectedKey;
@@ -106,31 +120,48 @@ export function CalendarGrid({
           const isFuture = date.getTime() > now.getTime();
 
           return (
-            <View key={key} style={{ width: `${100 / 7}%`, aspectRatio: 1 }} className="p-0.5">
+            <View
+              key={key}
+              style={{ width: `${100 / 7}%`, height: CELL_SIZE + 8 }}
+              className="items-center justify-center"
+            >
               <Pressable
                 onPress={() => onSelectDate(date)}
                 disabled={isFuture}
                 accessibilityRole="button"
                 accessibilityLabel={date.toDateString()}
                 accessibilityState={{ selected: isSelected, disabled: isFuture }}
-                className={`flex-1 items-center justify-center rounded-full ${
-                  isSelected ? 'bg-accent' : isToday ? 'border border-accent' : ''
+                style={{ width: CELL_SIZE, height: CELL_SIZE }}
+                className={`items-center justify-center rounded-full ${
+                  isSelected
+                    ? 'bg-accent'
+                    : isFlagged
+                      ? 'border border-dashed border-tertiaryAccent bg-tertiaryAccentFill/20'
+                      : isToday
+                        ? 'border border-accent'
+                        : ''
                 }`}
               >
                 <AppText
-                  variant="subheadline"
+                  variant="caption1"
                   className={
-                    isSelected ? 'text-white' : isFuture ? 'text-tertiaryLabel' : 'text-label'
+                    isSelected
+                      ? 'text-white'
+                      : isFlagged
+                        ? 'text-tertiaryAccent'
+                        : isFuture
+                          ? 'text-tertiaryLabel'
+                          : 'text-label'
                   }
                 >
                   {date.getDate()}
                 </AppText>
                 {/* Selected already shows its detail below — skip the redundant
                     (and, on the accent-filled circle, invisible) dot. */}
-                {!isSelected && (hasPhoto || isFlagged) ? (
+                {!isSelected && hasPhoto ? (
                   <View
-                    className="absolute bottom-1 h-1.5 w-1.5 rounded-full"
-                    style={{ backgroundColor: isFlagged ? colors.danger : colors.accent }}
+                    className="absolute bottom-0.5 h-1.5 w-1.5 rounded-full"
+                    style={{ backgroundColor: isFlagged ? colors.tertiaryAccent : colors.accent }}
                   />
                 ) : null}
               </Pressable>
@@ -139,17 +170,23 @@ export function CalendarGrid({
         })}
       </View>
 
-      <View className="flex-row items-center justify-center gap-4 pt-1">
+      <View className="flex-row items-center justify-between border-t border-separator/30 pt-2.5">
         <View className="flex-row items-center gap-1.5">
-          <View className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: colors.accent }} />
-          <AppText variant="caption2" className="text-tertiaryLabel">
-            Photo logged
+          <View className="h-2 w-2 rounded-full" style={{ backgroundColor: colors.accent }} />
+          <AppText variant="caption2" className="text-secondaryLabel">
+            Photos logged
           </AppText>
         </View>
         <View className="flex-row items-center gap-1.5">
-          <View className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: colors.danger }} />
-          <AppText variant="caption2" className="text-tertiaryLabel">
-            Needs attention
+          <View
+            className="h-2.5 w-2.5 rounded-full border border-dashed"
+            style={{
+              borderColor: colors.tertiaryAccent,
+              backgroundColor: colors.tertiaryAccentFill + '4D', // ~30% alpha
+            }}
+          />
+          <AppText variant="caption2" className="text-secondaryLabel">
+            Gentle check-in
           </AppText>
         </View>
       </View>

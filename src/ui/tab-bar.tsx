@@ -8,6 +8,7 @@ import { Tabs } from 'expo-router';
 import type { ComponentProps } from 'react';
 import { Platform, Pressable, StyleSheet, View } from 'react-native';
 import Animated, { LinearTransition } from 'react-native-reanimated';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { colors, fonts } from './tokens';
 
@@ -31,6 +32,20 @@ const ICONS: Record<string, { active: IconName; inactive: IconName }> = {
 
 const PILL_HEIGHT = 56;
 const FLOATING_MARGIN = 16;
+
+/**
+ * How much bottom padding a scrollable screen needs so its content clears the
+ * floating tab bar, on THIS device. Derived from the real safe-area inset, not
+ * a borrowed constant — the design system's own "5.5rem/88px" bottom-spacer
+ * token was sized for its own bar's own height/margin, not necessarily ours,
+ * and undershoots on a device whose home-indicator inset is larger than
+ * whatever they assumed. `extraGap` is comfortable clearance beyond the bar's
+ * own top edge, not just enough to stop touching it.
+ */
+export function useTabBarClearance(extraGap = 16): number {
+  const insets = useSafeAreaInsets();
+  return insets.bottom + FLOATING_MARGIN + PILL_HEIGHT + extraGap;
+}
 
 // Reanimated needs the animated wrapper created once, outside render, not
 // recreated on every tab-bar render.

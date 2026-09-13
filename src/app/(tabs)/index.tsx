@@ -1,15 +1,17 @@
 /**
  * Home — the full screen from the Stitch "NailGrow - Today (Home)" design,
- * implemented element-for-element with two deliberate exclusions (see below).
- * Some pieces (the trial countdown) use minimal real backing logic rather
- * than a fully-built feature — flagged inline — per instruction to implement
- * the full surface now and deepen individual pieces later.
+ * implemented against the actual rendered HTML/screenshot (assets/mockup-
+ * preview/), not a text description of it — element-for-element, with three
+ * deliberate exclusions (see below). The trial countdown uses minimal real
+ * backing logic rather than a fully-built feature — flagged inline.
  *
- * Excluded, not "simplified": the mockup's "82% Cuticle Health" metric and its
- * per-photo "Edge smooth / Cuticle calm" tags. Both assert a physical
- * assessment of the user's nails that nothing in this app computes — CLAUDE.md
- * rules out fabricated metrics and AI grading of progress explicitly, and
- * that rule doesn't bend for a reskin. Nothing stands in their place.
+ * Excluded, not "simplified": the mockup's "82% Cuticle Health" metric, its
+ * "Bed tissue restoring" line, its per-photo "Edge smooth / Cuticle calm"
+ * tags, and its "Healthy regrowth" status pill. All four assert a physical
+ * assessment of the user's nails, or a healing process, that nothing in this
+ * app computes — CLAUDE.md rules out fabricated metrics, AI grading, and
+ * medical/therapeutic claims explicitly, and that doesn't bend for a reskin.
+ * Nothing stands in their place.
  */
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Image } from 'expo-image';
@@ -27,11 +29,13 @@ import { useTrialStatus } from '@/purchases/use-trial-status';
 import { Button } from '@/ui/button';
 import { CalendarGrid, dateKey } from '@/ui/calendar-grid';
 import { Card } from '@/ui/card';
+import { useTabBarClearance } from '@/ui/tab-bar';
 import { AppText } from '@/ui/text';
 import { colors } from '@/ui/tokens';
 
-const HAND_LABEL: Record<Photo['hand'], string> = { left: 'Left hand', right: 'Right hand' };
+const HAND_LABEL: Record<Photo['hand'], string> = { left: 'Left Hand', right: 'Right Hand' };
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
+const PHOTO_CARD_HEIGHT = 128; // matches the design's fixed h-32, not a square aspect ratio
 
 function startOfDay(date: Date): Date {
   return new Date(date.getFullYear(), date.getMonth(), date.getDate());
@@ -49,6 +53,7 @@ export default function Home() {
   const { streak, dayCount, reload: reloadStreak } = useStreak();
   const { photos, flaggedIds } = useCapturedPhotos();
   const { daysRemaining } = useTrialStatus();
+  const tabBarClearance = useTabBarClearance();
 
   const [month, setMonth] = useState(() => new Date());
   const [selectedDate, setSelectedDate] = useState(() => new Date());
@@ -115,7 +120,12 @@ export default function Home() {
   return (
     <SafeAreaView edges={['top']} className="flex-1 bg-background">
       <ScrollView
-        contentContainerClassName="gap-5 px-4 pb-10 pt-2"
+        // px-5 = the design's `margin` token (1.25rem/20px). gap-5 = the real
+        // markup's `space-y-5` (1.25rem/20px) — confirmed from code.html, not
+        // the 24px `space-lg` guessed previously. Bottom padding is computed
+        // per-device (see useTabBarClearance) rather than a borrowed constant.
+        contentContainerClassName="gap-5 px-5 pt-2"
+        contentContainerStyle={{ paddingBottom: tabBarClearance }}
         showsVerticalScrollIndicator={false}
       >
         {/* Header */}
@@ -128,8 +138,12 @@ export default function Home() {
           </View>
           <View className="flex-row items-center gap-2">
             {daysRemaining > 0 ? (
-              <View className="rounded-full bg-secondaryAccentFill px-3 py-1.5">
-                <AppText variant="caption1" className="text-secondaryAccent">
+              <View className="rounded-full bg-tertiaryBackground px-2.5 py-1">
+                {/* caption2's font file is Medium(500); the design's badge is
+                    SemiBold(600) at this size, which isn't one of our loaded
+                    weights — Medium is close enough not to warrant a sixth
+                    font file for one badge. */}
+                <AppText variant="caption2" className="text-accentText">
                   {daysRemaining} day{daysRemaining === 1 ? '' : 's'} free
                 </AppText>
               </View>
@@ -146,28 +160,38 @@ export default function Home() {
           </View>
         </View>
 
-        {/* Streak / milestone card */}
-        <Card className="gap-4">
-          <View className="flex-row items-center gap-1.5 self-start rounded-full bg-tertiaryBackground px-3 py-1">
-            <Ionicons name="ribbon-outline" size={14} color={colors.accentText} />
-            <AppText variant="caption2" className="text-accentText">
-              Personal milestone
-            </AppText>
+        {/* Streak / milestone card. The capture CTA sits below it, not nested
+            inside — matches the design's layout (a card, then a full-width
+            button as its own element), not just its colours. */}
+        <Card className="gap-4 p-5">
+          <View className="flex-row items-start justify-between">
+            <View className="flex-1 gap-2">
+              <View className="flex-row items-center gap-1.5 self-start rounded-full bg-tertiaryBackground px-2.5 py-0.5">
+                <Ionicons name="checkmark-circle" size={14} color={colors.secondaryAccent} />
+                <AppText variant="caption2" className="text-secondaryAccent">
+                  Personal Milestone
+                </AppText>
+              </View>
+              <View>
+                <AppText variant="largeTitle" className="text-label">
+                  {dayCount}
+                </AppText>
+                <AppText variant="footnote" className="text-secondaryLabel">
+                  {dayCount === 1 ? 'day tracked' : 'days tracked'}
+                </AppText>
+              </View>
+            </View>
+            <View className="h-12 w-12 items-center justify-center rounded-full bg-tertiaryBackground">
+              <Ionicons name="leaf" size={24} color={colors.accentText} />
+            </View>
           </View>
-          <View>
-            <AppText variant="largeTitle" className="text-label">
-              {dayCount}
-            </AppText>
-            <AppText variant="body" className="text-secondaryLabel">
-              {dayCount === 1 ? 'day tracked' : 'days tracked'}
-            </AppText>
-          </View>
-          <Button
-            label="Take today's photo"
-            onPress={() => router.push('/capture')}
-            icon={<Ionicons name="camera" size={18} color="#fff" />}
-          />
         </Card>
+        <Button
+          label="Take today's photo"
+          onPress={() => router.push('/capture')}
+          icon={<Ionicons name="camera" size={22} color="#fff" />}
+          fill
+        />
 
         {/* Calendar */}
         <CalendarGrid
@@ -179,21 +203,26 @@ export default function Home() {
           flaggedDates={flaggedDates}
         />
 
-        {/* Selected day detail */}
-        <Card className="gap-3">
-          <AppText variant="caption1" className="text-tertiaryLabel">
-            Gentle check-in
-          </AppText>
+        {/* Selected day detail. The design pairs this heading with a
+            "Healthy regrowth"-style status pill — excluded, see file header. */}
+        <Card className="gap-3 p-4">
           <AppText variant="title2" className="text-label">
             {dayHeading}
           </AppText>
 
           {selectedPhotos.length === 0 ? (
-            <View className="items-center gap-2 py-4">
-              <Ionicons name="images-outline" size={28} color={colors.tertiaryLabel} />
-              <AppText variant="subheadline" className="text-center text-secondaryLabel">
-                No photo logged this day. That’s alright — pick up again whenever you’re ready.
-              </AppText>
+            <View className="flex-row items-start gap-3 rounded-card border border-dashed border-separator bg-tertiaryBackground/60 p-4">
+              <View className="h-9 w-9 items-center justify-center rounded-full bg-tertiaryBackground">
+                <Ionicons name="information-circle-outline" size={18} color={colors.accentText} />
+              </View>
+              <View className="flex-1 gap-1">
+                <AppText variant="label" className="text-label">
+                  Gentle Observation
+                </AppText>
+                <AppText variant="footnote" className="text-secondaryLabel">
+                  No photo logged this day. That’s alright — pick up again whenever you’re ready.
+                </AppText>
+              </View>
             </View>
           ) : (
             <View className="gap-3">
@@ -210,40 +239,56 @@ export default function Home() {
                   <Pressable
                     key={photo.id}
                     onPress={() => setFullscreenPhoto(photo)}
-                    className="flex-1 gap-2"
+                    className="relative flex-1 overflow-hidden rounded-2xl border border-separator/40 bg-tertiaryBackground"
+                    style={{ height: PHOTO_CARD_HEIGHT }}
                     accessibilityRole="button"
                     accessibilityLabel={`View ${HAND_LABEL[photo.hand]} photo fullscreen`}
                   >
                     <Image
                       source={{ uri: photo.thumbUri }}
-                      style={{ width: '100%', aspectRatio: 1, borderRadius: 16 }}
+                      style={StyleSheet.absoluteFill}
                       contentFit="cover"
                     />
-                    <AppText variant="caption1" className="text-center text-secondaryLabel">
-                      {HAND_LABEL[photo.hand]}
-                    </AppText>
+                    {/* Hand label as an overlaid pill, top-left of the image —
+                        matches the design; unlike its bottom tag (excluded),
+                        this is just a factual label, not a judgment. */}
+                    <View className="absolute left-2 top-2 rounded-full bg-black/40 px-2 py-0.5">
+                      <AppText variant="caption2" className="text-white">
+                        {HAND_LABEL[photo.hand]}
+                      </AppText>
+                    </View>
                   </Pressable>
                 ))}
               </View>
-              <AppText variant="caption2" className="text-center text-tertiaryLabel">
-                Tap a photo to view it fullscreen
-              </AppText>
+              <View className="flex-row items-center justify-center gap-1">
+                <Ionicons name="scan-outline" size={14} color={colors.tertiaryLabel} />
+                <AppText variant="caption2" className="text-tertiaryLabel">
+                  Tap thumbnails to expand fullscreen
+                </AppText>
+              </View>
             </View>
           )}
         </Card>
 
-        {/* Reassurance + relapse logging */}
-        <View className="items-center gap-3 px-2">
-          <AppText variant="footnote" className="text-center text-tertiaryLabel">
-            Tracking here is judgment-free. A relapse doesn’t erase your progress — it just starts
-            a new streak.
-          </AppText>
-          <Button
-            label="Log a relapse"
-            variant="ghost"
+        {/* Discreet relapse-logging action, then the reassurance line below it
+            — that order (not reversed) matches the design. This is
+            deliberately NOT the shared `Button` — the real markup renders it
+            as a small inline text+icon row (11px label), not a full button. */}
+        <View className="items-center gap-1 pb-4 pt-1">
+          <Pressable
             onPress={onLogRelapse}
-            icon={<Ionicons name="refresh" size={16} color={colors.accentText} />}
-          />
+            accessibilityRole="button"
+            accessibilityLabel="Log a relapse or reset streak"
+            className="flex-row items-center gap-1.5 rounded-full px-3 py-2"
+          >
+            <Ionicons name="refresh" size={16} color={colors.tertiaryAccent} />
+            <AppText variant="caption2" className="text-secondaryLabel">
+              Log a relapse or reset streak
+            </AppText>
+          </Pressable>
+          <AppText variant="caption2" className="text-center text-tertiaryLabel">
+            Judgment-free tracking keeps self-compassion first.
+          </AppText>
         </View>
       </ScrollView>
 
