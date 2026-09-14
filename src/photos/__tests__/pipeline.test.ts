@@ -1,4 +1,4 @@
-import { listAllPhotos } from '@/db/queries';
+import { getReferencePhoto, listAllPhotos, pinReference } from '@/db/queries';
 import { capturePhoto, deletePhoto, type CaptureInput } from '@/photos/pipeline';
 import type { PipelineDeps } from '@/photos/ports';
 
@@ -216,6 +216,89 @@ describe('deletePhoto', () => {
       const result = await deletePhoto(deps, 'ghost');
       expect(result.ok).toBe(false);
       if (!result.ok) expect(result.error.code).toBe('NOT_FOUND');
+    } finally {
+      close();
+    }
+  });
+});
+
+describe('capturePhoto — same-day retake folds into the existing row', () => {
+  it('a second capture of the same hand on the same day updates the row in place, not a duplicate', async () => {
+    const { deps, fs, close } = makeDeps();
+    try {
+      fs.put(SOURCE, 3_000_000);
+
+      const first = await capture(deps, {
+        hand: 'left',
+        capturedAt: new Date('2026-09-09T09:00:00.000Z'),
+      });
+      expect(first.ok).toBe(true);
+
+      const second = await capture(deps, {
+        hand: 'left',
+        capturedAt: new Date('2026-09-09T18:30:00.000Z'), // same calendar day, later
+      });
+      expect(second.ok).toBe(true);
+
+      const rows = listAllPhotos(deps.db);
+      expect(rows).toHaveLength(1); // <-- the guarantee: no duplicate log entry
+      expect(rows[0]?.id).toBe('id-1'); // same row, updated — not a new id
+      expect(rows[0]?.capturedAt).toEqual(new Date('2026-09-09T18:30:00.000Z'));
+      expect(rows[0]?.fileUri).toBe('file:///doc/photos/id-2.jpg'); // points at the retake's files
+      expect(rows[0]?.thumbUri).toBe('file:///doc/photos/thumbs/id-2.jpg');
+
+      // the first capture's now-superseded files are gone, not orphaned
+      expect(fs.has('file:///doc/photos/id-1.jpg')).toBe(false);
+      expect(fs.has('file:///doc/photos/thumbs/id-1.jpg')).toBe(false);
+      expect(fs.has('file:///doc/photos/id-2.jpg')).toBe(true);
+      expect(fs.has('file:///doc/photos/thumbs/id-2.jpg')).toBe(true);
+    } finally {
+      close();
+    }
+  });
+
+  it('preserves isReference across a same-day retake of the pinned hand', async () => {
+    const { deps, fs, close } = makeDeps();
+    try {
+      fs.put(SOURCE, 3_000_000);
+      await capture(deps, { hand: 'left', capturedAt: new Date('2026-09-09T09:00:00.000Z') });
+
+      pinReference(deps.db, 'id-1');
+      expect(getReferencePhoto(deps.db, 'left')?.id).toBe('id-1');
+
+      await capture(deps, { hand: 'left', capturedAt: new Date('2026-09-09T18:00:00.000Z') });
+
+      const reference = getReferencePhoto(deps.db, 'left');
+      expect(reference?.id).toBe('id-1'); // same row — the pin travels with it
+      expect(reference?.fileUri).toBe('file:///doc/photos/id-2.jpg'); // but now the retake's file
+    } finally {
+      close();
+    }
+  });
+
+  it('a different hand on the same day still gets its own row', async () => {
+    const { deps, fs, close } = makeDeps();
+    try {
+      fs.put(SOURCE, 3_000_000);
+      await capture(deps, { hand: 'left', capturedAt: new Date('2026-09-09T09:00:00.000Z') });
+      await capture(deps, { hand: 'right', capturedAt: new Date('2026-09-09T09:05:00.000Z') });
+
+      const rows = listAllPhotos(deps.db);
+      expect(rows).toHaveLength(2);
+      expect(rows.map((row) => row.hand).sort()).toEqual(['left', 'right']);
+    } finally {
+      close();
+    }
+  });
+
+  it('the same hand on a different day still gets its own row', async () => {
+    const { deps, fs, close } = makeDeps();
+    try {
+      fs.put(SOURCE, 3_000_000);
+      await capture(deps, { hand: 'left', capturedAt: new Date('2026-09-09T09:00:00.000Z') });
+      await capture(deps, { hand: 'left', capturedAt: new Date('2026-09-10T09:00:00.000Z') });
+
+      expect(listAllPhotos(deps.db)).toHaveLength(2);
     } finally {
       close();
     }

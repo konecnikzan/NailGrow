@@ -1,4 +1,4 @@
-import { and, asc, eq, gte, lte } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, lte } from 'drizzle-orm';
 
 import { newId } from '../ids';
 import {
@@ -20,6 +20,45 @@ import type { Database } from '../types';
  */
 export function createPhoto(db: Database, photo: NewPhoto): Photo {
   return db.insert(photos).values(photo).returning().get();
+}
+
+/**
+ * The most recent photo for `hand` captured within `[dayStart, dayEnd]`, if
+ * any. Used to fold a same-day retake into that day's existing log entry
+ * instead of piling up duplicates — `desc` + a single row guards against any
+ * pre-existing duplicates from before this rule existed.
+ */
+export function getPhotoForHandOnDay(
+  db: Database,
+  hand: Hand,
+  dayStart: Date,
+  dayEnd: Date,
+): Photo | undefined {
+  return db
+    .select()
+    .from(photos)
+    .where(and(eq(photos.hand, hand), gte(photos.capturedAt, dayStart), lte(photos.capturedAt, dayEnd)))
+    .orderBy(desc(photos.capturedAt))
+    .limit(1)
+    .get();
+}
+
+/**
+ * Overwrite an existing row's capture data in place (same id, so
+ * `referencePhotoId` pointers and `isReference` stay attached to it) — used
+ * to fold a same-day retake into the day's existing entry rather than
+ * inserting a second row for the same hand/day. Caller is responsible for
+ * removing the old file/thumb this replaces once this returns.
+ */
+export function updatePhotoCapture(
+  db: Database,
+  id: string,
+  fields: Pick<
+    NewPhoto,
+    'capturedAt' | 'fileUri' | 'thumbUri' | 'width' | 'height' | 'normalisedOrientation' | 'referencePhotoId'
+  >,
+): Photo {
+  return db.update(photos).set(fields).where(eq(photos.id, id)).returning().get();
 }
 
 /**

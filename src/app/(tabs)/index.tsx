@@ -15,20 +15,23 @@
  */
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Image } from 'expo-image';
-import { router } from 'expo-router';
-import { useMemo, useState } from 'react';
+import { router, useFocusEffect } from 'expo-router';
+import { useCallback, useMemo, useState } from 'react';
 import { Alert, Modal, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { db } from '@/db/client';
 import { logRelapse } from '@/db/queries';
 import type { Photo } from '@/db/schema';
+import { deletePhoto } from '@/photos';
 import { useCapturedPhotos } from '@/photos/use-captured-photos';
 import { useStreak } from '@/photos/use-streak';
 import { useTrialStatus } from '@/purchases/use-trial-status';
 import { Button } from '@/ui/button';
 import { CalendarGrid, dateKey } from '@/ui/calendar-grid';
 import { Card } from '@/ui/card';
+import { ConfirmDialog } from '@/ui/confirm-dialog';
+import { PhotoThumbnail } from '@/ui/photo-thumbnail';
 import { useTabBarClearance } from '@/ui/tab-bar';
 import { AppText } from '@/ui/text';
 import { colors } from '@/ui/tokens';
@@ -51,15 +54,33 @@ function capturedAtLabel(date: Date): string {
 
 export default function Home() {
   const { streak, dayCount, reload: reloadStreak } = useStreak();
-  const { photos, flaggedIds } = useCapturedPhotos();
+  const { photos, flaggedIds, reload: reloadPhotos } = useCapturedPhotos();
   const { daysRemaining } = useTrialStatus();
   const tabBarClearance = useTabBarClearance();
+
+  // The tab screen stays mounted while Capture is pushed on top, so its own
+  // `useState` data doesn't naturally refresh when we come back — without
+  // this, a just-saved photo (or a relapse logged elsewhere) wouldn't show up
+  // until something else happened to remount Home.
+  useFocusEffect(
+    useCallback(() => {
+      reloadPhotos();
+      reloadStreak();
+    }, [reloadPhotos, reloadStreak]),
+  );
 
   const [month, setMonth] = useState(() => new Date());
   const [selectedDate, setSelectedDate] = useState(() => new Date());
   const [fullscreenPhoto, setFullscreenPhoto] = useState<Photo | null>(null);
+  const [photoToDelete, setPhotoToDelete] = useState<Photo | null>(null);
+  const [relapseDialogVisible, setRelapseDialogVisible] = useState(false);
 
-  const { photosByDay, markedDates, flaggedDates } = useMemo(() => {
+  // `flaggedDates` (file-integrity failures) and `partialDates` (only one
+  // hand logged that day) are two different concepts that happen to share a
+  // dashed-ring-style calendar treatment in the design — kept as separate
+  // sets rather than merged, since one is a reliability warning (shown as
+  // inline text below) and the other is just "this day isn't done yet".
+  const { photosByDay, markedDates, flaggedDates, partialDates } = useMemo(() => {
     const byDay = new Map<string, Photo[]>();
     const flagged = new Set<string>();
     for (const photo of photos) {
@@ -69,7 +90,17 @@ export default function Home() {
       else byDay.set(key, [photo]);
       if (flaggedIds.has(photo.id)) flagged.add(key);
     }
-    return { photosByDay: byDay, markedDates: new Set(byDay.keys()), flaggedDates: flagged };
+    const partial = new Set<string>();
+    for (const [key, dayPhotos] of byDay) {
+      const hands = new Set(dayPhotos.map((photo) => photo.hand));
+      if (hands.size === 1) partial.add(key);
+    }
+    return {
+      photosByDay: byDay,
+      markedDates: new Set(byDay.keys()),
+      flaggedDates: flagged,
+      partialDates: partial,
+    };
   }, [photos, flaggedIds]);
 
   const selectedPhotos = photosByDay.get(dateKey(selectedDate)) ?? [];
@@ -99,22 +130,21 @@ export default function Home() {
     setMonth((current) => new Date(current.getFullYear(), current.getMonth() + direction, 1));
   }
 
-  function onLogRelapse() {
-    Alert.alert(
-      'Log a relapse?',
-      "This starts a new streak. Nothing is deleted — your photos and history stay exactly as they are.",
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Log relapse',
-          style: 'destructive',
-          onPress: () => {
-            logRelapse(db, {});
-            reloadStreak();
-          },
-        },
-      ],
-    );
+  function onConfirmLogRelapse() {
+    logRelapse(db, {});
+    reloadStreak();
+    setRelapseDialogVisible(false);
+  }
+
+  async function onConfirmDeletePhoto() {
+    if (!photoToDelete) return;
+    const result = await deletePhoto(photoToDelete.id);
+    setPhotoToDelete(null);
+    if (!result.ok) {
+      Alert.alert('Couldn’t delete photo', result.error.message);
+      return;
+    }
+    reloadPhotos();
   }
 
   return (
@@ -163,16 +193,19 @@ export default function Home() {
         {/* Streak / milestone card. The capture CTA sits below it, not nested
             inside — matches the design's layout (a card, then a full-width
             button as its own element), not just its colours. */}
-        <Card className="gap-4 p-5">
+        <Card className="gap-2 p-5">
           <View className="flex-row items-start justify-between">
-            <View className="flex-1 gap-2">
+            <View className="gap-2">
               <View className="flex-row items-center gap-1.5 self-start rounded-full bg-tertiaryBackground px-2.5 py-0.5">
                 <Ionicons name="checkmark-circle" size={14} color={colors.secondaryAccent} />
                 <AppText variant="caption2" className="text-secondaryAccent">
                   Personal Milestone
                 </AppText>
               </View>
-              <View>
+              {/* One line, not a stacked number-then-label — number and unit
+                  share a baseline, sized differently rather than each on its
+                  own line. */}
+              <View className="flex-row items-baseline gap-1.5">
                 <AppText variant="largeTitle" className="text-label">
                   {dayCount}
                 </AppText>
@@ -181,8 +214,11 @@ export default function Home() {
                 </AppText>
               </View>
             </View>
-            <View className="h-12 w-12 items-center justify-center rounded-full bg-tertiaryBackground">
-              <Ionicons name="leaf" size={24} color={colors.accentText} />
+            {/* The design's "streak icon" badge (a flame in a soft tinted
+                circle) — a decorative streak indicator, not a metric, so it
+                carries no fabricated number or status claim. */}
+            <View className="h-14 w-14 items-center justify-center rounded-full border border-separator/30 bg-tertiaryBackground">
+              <Ionicons name="flame" size={28} color={colors.accentText} />
             </View>
           </View>
         </Card>
@@ -200,7 +236,7 @@ export default function Home() {
           onSelectDate={setSelectedDate}
           onChangeMonth={onChangeMonth}
           markedDates={markedDates}
-          flaggedDates={flaggedDates}
+          partialDates={partialDates}
         />
 
         {/* Selected day detail. The design pairs this heading with a
@@ -235,29 +271,22 @@ export default function Home() {
                 </AppText>
               ) : null}
               <View className="flex-row gap-3">
+                {/* Full-res, not the 320px thumbnail: each tile is `flex-1`
+                    in a row that can hold just one photo (a partial
+                    check-in), so it can stretch to the card's full width —
+                    a thumbnail visibly upscales/blurs at that size. Only 1-2
+                    images ever render here at once (not a scrolling grid),
+                    so decoding full-res costs nothing the thumbnail was
+                    actually protecting against. */}
                 {selectedPhotos.map((photo) => (
-                  <Pressable
+                  <PhotoThumbnail
                     key={photo.id}
+                    uri={photo.fileUri}
+                    label={HAND_LABEL[photo.hand]}
+                    height={PHOTO_CARD_HEIGHT}
                     onPress={() => setFullscreenPhoto(photo)}
-                    className="relative flex-1 overflow-hidden rounded-2xl border border-separator/40 bg-tertiaryBackground"
-                    style={{ height: PHOTO_CARD_HEIGHT }}
-                    accessibilityRole="button"
-                    accessibilityLabel={`View ${HAND_LABEL[photo.hand]} photo fullscreen`}
-                  >
-                    <Image
-                      source={{ uri: photo.thumbUri }}
-                      style={StyleSheet.absoluteFill}
-                      contentFit="cover"
-                    />
-                    {/* Hand label as an overlaid pill, top-left of the image —
-                        matches the design; unlike its bottom tag (excluded),
-                        this is just a factual label, not a judgment. */}
-                    <View className="absolute left-2 top-2 rounded-full bg-black/40 px-2 py-0.5">
-                      <AppText variant="caption2" className="text-white">
-                        {HAND_LABEL[photo.hand]}
-                      </AppText>
-                    </View>
-                  </Pressable>
+                    onLongPress={() => setPhotoToDelete(photo)}
+                  />
                 ))}
               </View>
               <View className="flex-row items-center justify-center gap-1">
@@ -276,7 +305,7 @@ export default function Home() {
             as a small inline text+icon row (11px label), not a full button. */}
         <View className="items-center gap-1 pb-4 pt-1">
           <Pressable
-            onPress={onLogRelapse}
+            onPress={() => setRelapseDialogVisible(true)}
             accessibilityRole="button"
             accessibilityLabel="Log a relapse or reset streak"
             className="flex-row items-center gap-1.5 rounded-full px-3 py-2"
@@ -308,6 +337,31 @@ export default function Home() {
           ) : null}
         </Pressable>
       </Modal>
+
+      <ConfirmDialog
+        visible={photoToDelete !== null}
+        icon={<Ionicons name="trash-outline" size={26} color={colors.danger} />}
+        title="Delete this photo?"
+        message="This removes it and its file. This can’t be undone."
+        confirmLabel="Delete"
+        destructive
+        onConfirm={() => void onConfirmDeletePhoto()}
+        onCancel={() => setPhotoToDelete(null)}
+      />
+
+      {/* Deliberately not `destructive` — CLAUDE.md rules out red/alarming
+          framing for a relapse specifically ("no red warnings, no 'you broke
+          your streak'"), so this stays the same calm, neutral treatment as
+          any other confirmation, not the delete dialog's danger styling. */}
+      <ConfirmDialog
+        visible={relapseDialogVisible}
+        icon={<Ionicons name="refresh" size={26} color={colors.tertiaryAccent} />}
+        title="Log a relapse?"
+        message="This starts a new streak. Nothing is deleted — your photos and history stay exactly as they are."
+        confirmLabel="Log relapse"
+        onConfirm={onConfirmLogRelapse}
+        onCancel={() => setRelapseDialogVisible(false)}
+      />
     </SafeAreaView>
   );
 }

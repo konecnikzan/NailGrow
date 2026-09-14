@@ -1,7 +1,9 @@
 import {
   createPhoto,
   deletePhotoRow,
+  getPhotoForHandOnDay,
   getPhotoWithNails,
+  updatePhotoCapture,
 } from '@/db/queries';
 import type { Hand, Photo } from '@/db/schema';
 
@@ -46,10 +48,14 @@ export interface CaptureInput {
  *   4. render a thumbnail                  -> temp file
  *   5. move both temp files into <document>/photos/... under the stable name
  *   6. VERIFY both written files (exists / non-empty / decodes / dimensions)
- *   7. only now insert the database row
+ *   7. only now write the database row — an UPDATE of that hand's existing
+ *      row for the same calendar day if one exists, so retaking a photo
+ *      updates the day's log instead of piling up a duplicate; an INSERT
+ *      otherwise. The old file/thumb a same-day update replaces are removed
+ *      only after the row is safely pointing at the new ones.
  *
  * If any step 3-7 fails, every file this call wrote is deleted before returning,
- * so a failure never leaves an orphan file and — because the insert is dead last
+ * so a failure never leaves an orphan file and — because the write is dead last
  * — never an orphan row.
  */
 export async function capturePhoto(
@@ -124,19 +130,36 @@ export async function capturePhoto(
   const thumbCheck = await verifyImageFile(deps, destThumb);
   if (!thumbCheck.ok) return withRollback(fs, written, errorResult(thumbCheck.error));
 
-  // 7. persist
+  // 7. persist — fold into the existing row for this hand/day if there is
+  // one, otherwise insert a new one.
+  const existing = getPhotoForHandOnDay(db, input.hand, startOfDay(capturedAt), endOfDay(capturedAt));
   try {
-    const photo = createPhoto(db, {
-      id,
-      capturedAt,
-      fileUri: destPhoto,
-      thumbUri: destThumb,
-      hand: input.hand,
-      width: photoCheck.value.width,
-      height: photoCheck.value.height,
-      normalisedOrientation: input.sourceOrientation ?? 1,
-      referencePhotoId: input.referencePhotoId ?? null,
-    });
+    const photo = existing
+      ? updatePhotoCapture(db, existing.id, {
+          capturedAt,
+          fileUri: destPhoto,
+          thumbUri: destThumb,
+          width: photoCheck.value.width,
+          height: photoCheck.value.height,
+          normalisedOrientation: input.sourceOrientation ?? 1,
+          referencePhotoId: input.referencePhotoId ?? null,
+        })
+      : createPhoto(db, {
+          id,
+          capturedAt,
+          fileUri: destPhoto,
+          thumbUri: destThumb,
+          hand: input.hand,
+          width: photoCheck.value.width,
+          height: photoCheck.value.height,
+          normalisedOrientation: input.sourceOrientation ?? 1,
+          referencePhotoId: input.referencePhotoId ?? null,
+        });
+    // The row now points only at the new files — the old ones (if this was
+    // a same-day update) are orphaned. Best-effort cleanup, same as
+    // `deletePhoto`: a stranded file is harmless, a row pointing at a
+    // missing one is not, so this only ever runs after the row is safe.
+    if (existing) removeAll(fs, [existing.fileUri, existing.thumbUri]);
     return ok(photo);
   } catch (cause) {
     return withRollback(
@@ -144,11 +167,20 @@ export async function capturePhoto(
       written,
       failure(
         'DB_INSERT_FAILED',
-        'Files were written and verified but the database insert failed; files rolled back',
+        'Files were written and verified but the database write failed; files rolled back',
         { cause },
       ),
     );
   }
+}
+
+/** Local-calendar start of day (not UTC) — matches the Home calendar's `dateKey`. */
+function startOfDay(date: Date): Date {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+}
+
+function endOfDay(date: Date): Date {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate(), 23, 59, 59, 999);
 }
 
 export interface DeletedPhoto {

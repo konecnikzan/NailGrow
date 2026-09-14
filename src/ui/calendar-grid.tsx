@@ -10,6 +10,18 @@ import { colors } from './tokens';
 // start `Date.getDay()` gives you.
 const WEEKDAY_LABELS = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
 const CELL_SIZE = 32;
+// The real markup's partial-check-in dot is literally Tailwind's emerald-500
+// — not one of CLAUDE.md's documented palette colours (the muted teal there
+// is a different, darker hue) — used as-is to match the mockup exactly.
+const PARTIAL_DOT_COLOR = '#10B981';
+// A soft halo around today's filled circle when it's the day being viewed.
+// RN has no separate ring layer, so this is a border on the same box as the
+// fill — but the background paints the FULL border-box (not just the padding
+// box), so a semi-transparent border just blends with whatever fill colour
+// sits under it, e.g. reading green-tinted on a partial-check-in day instead
+// of neutral gray. Must be fully opaque to actually mask the fill underneath.
+const TODAY_RING_WIDTH = 4;
+const TODAY_RING_COLOR = '#EAEBEF';
 
 /** Local-calendar-day key (not UTC) — a capture at 11pm shouldn't jump to the next day. */
 export function dateKey(date: Date): string {
@@ -26,13 +38,13 @@ export interface CalendarGridProps {
   onChangeMonth: (direction: -1 | 1) => void;
   /** Date keys (see `dateKey`) that have at least one captured photo. */
   markedDates: Set<string>;
-  /** Date keys where the integrity check flagged a photo — takes priority over `markedDates`. */
-  flaggedDates: Set<string>;
+  /** Date keys where only one hand was photographed that day — takes priority over `markedDates`. */
+  partialDates: Set<string>;
 }
 
 /**
  * Month calendar, habit-tracker style: every day is a cell, days with a photo
- * are marked, days the integrity check flagged are marked distinctly, and
+ * are marked, days with only one hand logged are marked distinctly, and
  * selecting a day is how the rest of the screen knows what to show below.
  */
 export function CalendarGrid({
@@ -41,7 +53,7 @@ export function CalendarGrid({
   onSelectDate,
   onChangeMonth,
   markedDates,
-  flaggedDates,
+  partialDates,
 }: CalendarGridProps) {
   const year = month.getFullYear();
   const monthIndex = month.getMonth();
@@ -115,9 +127,23 @@ export function CalendarGrid({
           const key = dateKey(date);
           const isSelected = key === selectedKey;
           const isToday = key === todayKey;
-          const isFlagged = flaggedDates.has(key);
+          const isPartial = partialDates.has(key);
           const hasPhoto = markedDates.has(key);
           const isFuture = date.getTime() > now.getTime();
+
+          // Solid fill is reserved for today and whichever day is currently
+          // selected/viewed below — same as the mockup's "18". A partial
+          // check-in on some OTHER day doesn't get promoted to a filled
+          // circle just for being partial; it's still a plain number with a
+          // green dot, same treatment a fully-logged day gets with a blue
+          // one. Partial only changes the FILL COLOUR on a day that's
+          // already filled for one of those other reasons.
+          const isFilled = isSelected || isToday;
+          const fillColor = isPartial ? PARTIAL_DOT_COLOR : colors.accent;
+          // The halo only marks the exact combined state the mockup shows it
+          // for: today, and currently the day being viewed.
+          const showTodayRing = isToday && isSelected;
+          const outerSize = CELL_SIZE + (showTodayRing ? TODAY_RING_WIDTH * 2 : 0);
 
           return (
             <View
@@ -131,40 +157,51 @@ export function CalendarGrid({
                 accessibilityRole="button"
                 accessibilityLabel={date.toDateString()}
                 accessibilityState={{ selected: isSelected, disabled: isFuture }}
-                style={{ width: CELL_SIZE, height: CELL_SIZE }}
-                className={`items-center justify-center rounded-full ${
-                  isSelected
-                    ? 'bg-accent'
-                    : isFlagged
-                      ? 'border border-dashed border-tertiaryAccent bg-tertiaryAccentFill/20'
-                      : isToday
-                        ? 'border border-accent'
-                        : ''
-                }`}
+                style={[
+                  { width: outerSize, height: outerSize },
+                  isFilled ? { backgroundColor: fillColor } : null,
+                  // Sizing both dimensions up by the ring width and adding an
+                  // opaque border draws a ring flush outside the circle
+                  // without shrinking the visible filled area (the border
+                  // sits in the outer band the size increase created) — no
+                  // separate overlay view needed. The border must be opaque
+                  // (see TODAY_RING_COLOR) or the fill shows through it.
+                  showTodayRing
+                    ? { borderWidth: TODAY_RING_WIDTH, borderColor: TODAY_RING_COLOR }
+                    : null,
+                ]}
+                // Every cell centers just the number, full stop — nothing
+                // about a dot's presence ever changes how the number itself
+                // is centered, which is what keeps every date on the exact
+                // same inline baseline. The today+selected cell shows no dot
+                // at all: clicking on today is confirmation enough on its
+                // own, on top of the ring.
+                className="items-center justify-center rounded-full"
               >
                 <AppText
                   variant="caption1"
                   className={
-                    isSelected
-                      ? 'text-white'
-                      : isFlagged
-                        ? 'text-tertiaryAccent'
-                        : isFuture
-                          ? 'text-tertiaryLabel'
-                          : 'text-label'
+                    isFilled ? 'text-white' : isFuture ? 'text-tertiaryLabel' : 'text-label'
                   }
                 >
                   {date.getDate()}
                 </AppText>
-                {/* Selected already shows its detail below — skip the redundant
-                    (and, on the accent-filled circle, invisible) dot. */}
-                {!isSelected && hasPhoto ? (
-                  <View
-                    className="absolute bottom-0.5 h-1.5 w-1.5 rounded-full"
-                    style={{ backgroundColor: isFlagged ? colors.tertiaryAccent : colors.accent }}
-                  />
-                ) : null}
               </Pressable>
+              {/* Sibling of the Pressable, not a child — an absolutely
+                  positioned dot here never affects the number's centering
+                  above, unlike putting it inside the circle's own flex flow.
+                  Only for plain (unfilled) days: a filled circle (today or
+                  selected) already communicates its own status by colour,
+                  and a dot sitting outside a solid fill on the plain card
+                  background would either be redundant or, for a white dot,
+                  invisible. Green for a partial check-in, same blue as the
+                  "Photos logged" legend otherwise. */}
+              {!isFilled && hasPhoto ? (
+                <View
+                  className="absolute bottom-0 h-1.5 w-1.5 rounded-full"
+                  style={{ backgroundColor: isPartial ? PARTIAL_DOT_COLOR : colors.accent }}
+                />
+              ) : null}
             </View>
           );
         })}
@@ -178,15 +215,9 @@ export function CalendarGrid({
           </AppText>
         </View>
         <View className="flex-row items-center gap-1.5">
-          <View
-            className="h-2.5 w-2.5 rounded-full border border-dashed"
-            style={{
-              borderColor: colors.tertiaryAccent,
-              backgroundColor: colors.tertiaryAccentFill + '4D', // ~30% alpha
-            }}
-          />
+          <View className="h-2 w-2 rounded-full" style={{ backgroundColor: PARTIAL_DOT_COLOR }} />
           <AppText variant="caption2" className="text-secondaryLabel">
-            Gentle check-in
+            Partial check-in
           </AppText>
         </View>
       </View>
